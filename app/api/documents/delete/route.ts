@@ -8,7 +8,7 @@ const uploadsDir = path.join(process.cwd(), "public", "uploads");
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = request.nextUrl;
     const documentId = searchParams.get("id");
     const phone = searchParams.get("phone");
 

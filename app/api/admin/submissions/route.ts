@@ -40,7 +40,7 @@ export async function DELETE(request: NextRequest) {
   if (authError) return authError;
   
   try {
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = request.nextUrl;
     const index = searchParams.get("index");
 
     if (index === null) {

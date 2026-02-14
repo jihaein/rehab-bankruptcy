@@ -10,11 +10,17 @@ const dataDir = path.join(process.cwd(), "data");
 const customersFile = path.join(dataDir, "customers.json");
 
 async function ensureDataDirectory() {
-  if (!existsSync(dataDir)) {
-    await mkdir(dataDir, { recursive: true });
-  }
-  if (!existsSync(customersFile)) {
-    await writeFile(customersFile, JSON.stringify([], null, 2));
+  try {
+    if (!existsSync(dataDir)) {
+      await mkdir(dataDir, { recursive: true });
+    }
+    if (!existsSync(customersFile)) {
+      await writeFile(customersFile, JSON.stringify([], null, 2), "utf-8");
+    }
+  } catch (error) {
+    console.error("Error ensuring data directory:", error);
+    // Vercel에서는 파일 시스템이 제한적일 수 있으므로 에러를 무시하지 않음
+    throw error;
   }
 }
 
@@ -105,15 +111,27 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([]);
     }
 
-    const data = await readFile(customersFile, "utf-8");
+    let data: string;
+    try {
+      data = await readFile(customersFile, "utf-8");
+    } catch (readError) {
+      console.error("Error reading customers file:", readError);
+      // 파일 읽기 실패 시 빈 배열 반환
+      return NextResponse.json([]);
+    }
+
+    // 빈 파일 처리
+    if (!data || data.trim() === "") {
+      return NextResponse.json([]);
+    }
+
     let customers;
-    
     try {
       customers = JSON.parse(data);
     } catch (parseError) {
       console.error("JSON parse error:", parseError);
       // 파일이 손상되었거나 비어있을 수 있음
-      customers = [];
+      return NextResponse.json([]);
     }
 
     // 배열이 아닌 경우 빈 배열로 반환
@@ -207,7 +225,7 @@ export async function DELETE(request: NextRequest) {
   try {
     await ensureDataDirectory();
 
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = request.nextUrl;
     const id = searchParams.get("id");
 
     if (!id) {
