@@ -5,6 +5,9 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { validateFileUpload } from "@/lib/middleware";
 
+// 동적 라우트로 강제 설정 (Next.js 14)
+export const dynamic = 'force-dynamic';
+
 const uploadsDir = path.join(process.cwd(), "public", "uploads");
 const documentsFile = path.join(process.cwd(), "data", "documents.json");
 

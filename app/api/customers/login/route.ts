@@ -4,6 +4,9 @@ import { existsSync } from "fs";
 import path from "path";
 import { verifyPassword } from "@/lib/auth";
 
+// 동적 라우트로 강제 설정 (Next.js 14)
+export const dynamic = 'force-dynamic';
+
 const customersFile = path.join(process.cwd(), "data", "customers.json");
 
 export async function POST(request: NextRequest) {

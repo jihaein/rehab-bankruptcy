@@ -3,6 +3,9 @@ import fs from "fs";
 import path from "path";
 import { adminAuthMiddleware } from "@/lib/middleware";
 
+// 동적 라우트로 강제 설정 (Next.js 14)
+export const dynamic = 'force-dynamic';
+
 const dataDir = path.join(process.cwd(), "data");
 const submissionsFile = path.join(dataDir, "submissions.json");
 

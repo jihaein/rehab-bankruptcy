@@ -6,6 +6,9 @@ import { randomInt } from "crypto";
 import { adminAuthMiddleware } from "@/lib/middleware";
 import { hashPassword } from "@/lib/auth";
 
+// 동적 라우트로 강제 설정 (Next.js 14)
+export const dynamic = 'force-dynamic';
+
 const dataDir = path.join(process.cwd(), "data");
 const customersFile = path.join(dataDir, "customers.json");
 

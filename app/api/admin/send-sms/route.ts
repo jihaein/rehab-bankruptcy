@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// 동적 라우트로 강제 설정 (Next.js 14)
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

@@ -3,6 +3,9 @@ import { readFile, writeFile, unlink } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 
+// 동적 라우트로 강제 설정 (Next.js 14)
+export const dynamic = 'force-dynamic';
+
 const documentsFile = path.join(process.cwd(), "data", "documents.json");
 const uploadsDir = path.join(process.cwd(), "public", "uploads");
 
