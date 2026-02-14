@@ -173,10 +173,23 @@ export default function AdminPage() {
         return;
       }
       
+      if (!response.ok) {
+        console.error("Failed to fetch customers:", response.status, response.statusText);
+        setCustomers([]); // 에러 시 빈 배열로 설정
+        return;
+      }
+      
       const data = await response.json();
-      setCustomers(data);
+      // 배열인지 확인
+      if (Array.isArray(data)) {
+        setCustomers(data);
+      } else {
+        console.error("Invalid data format:", data);
+        setCustomers([]);
+      }
     } catch (error) {
       console.error("Error fetching customers:", error);
+      setCustomers([]); // 에러 시 빈 배열로 설정
     }
   };
 

@@ -106,16 +106,28 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await readFile(customersFile, "utf-8");
-    const customers = JSON.parse(data);
+    let customers;
+    
+    try {
+      customers = JSON.parse(data);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+      // 파일이 손상되었거나 비어있을 수 있음
+      customers = [];
+    }
+
+    // 배열이 아닌 경우 빈 배열로 반환
+    if (!Array.isArray(customers)) {
+      console.error("Customers data is not an array:", customers);
+      return NextResponse.json([]);
+    }
 
     // 관리자용이므로 비밀번호 포함하여 반환
     return NextResponse.json(customers);
   } catch (error) {
     console.error("Error reading customers:", error);
-    return NextResponse.json(
-      { error: "고객 정보를 불러오는 중 오류가 발생했습니다." },
-      { status: 500 }
-    );
+    // 에러 발생 시 빈 배열 반환 (프론트엔드에서 filter 에러 방지)
+    return NextResponse.json([], { status: 200 });
   }
 }
 
