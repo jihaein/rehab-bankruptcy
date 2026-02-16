@@ -179,12 +179,21 @@ export default function AdminPage() {
         return;
       }
       
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error("Failed to parse JSON response:", jsonError);
+        setCustomers([]);
+        return;
+      }
+      
       // 배열인지 확인
       if (Array.isArray(data)) {
         setCustomers(data);
       } else {
-        console.error("Invalid data format:", data);
+        console.error("Invalid data format (not an array):", data);
+        // 에러 객체나 다른 형식이어도 빈 배열로 설정
         setCustomers([]);
       }
     } catch (error) {

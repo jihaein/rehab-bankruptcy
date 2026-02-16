@@ -22,8 +22,8 @@ async function ensureDataDirectory() {
     }
   } catch (error) {
     console.error("Error ensuring data directory:", error);
-    // Vercel에서는 파일 시스템이 제한적일 수 있으므로 에러를 무시하지 않음
-    throw error;
+    // Vercel에서는 파일 시스템이 제한적일 수 있음
+    // 에러를 throw하지 않고 계속 진행 (파일이 없으면 빈 배열 반환)
   }
 }
 
@@ -107,10 +107,19 @@ export async function GET(request: NextRequest) {
   const authError = await adminAuthMiddleware(request);
   if (authError) return authError;
   
+  // 모든 에러를 잡아서 빈 배열 반환
   try {
-    await ensureDataDirectory();
+    // 디렉토리 생성 시도 (실패해도 계속 진행)
+    try {
+      await ensureDataDirectory();
+    } catch (dirError) {
+      console.error("Directory creation failed (may be read-only in Vercel):", dirError);
+      // 계속 진행 - 파일이 없으면 빈 배열 반환
+    }
 
+    // 파일이 없으면 빈 배열 반환
     if (!existsSync(customersFile)) {
+      console.log("Customers file does not exist, returning empty array");
       return NextResponse.json([]);
     }
 
@@ -145,9 +154,9 @@ export async function GET(request: NextRequest) {
 
     // 관리자용이므로 비밀번호 포함하여 반환
     return NextResponse.json(customers);
-  } catch (error) {
-    console.error("Error reading customers:", error);
-    // 에러 발생 시 빈 배열 반환 (프론트엔드에서 filter 에러 방지)
+  } catch (error: any) {
+    console.error("Unexpected error reading customers:", error);
+    // 어떤 에러가 발생해도 빈 배열 반환 (프론트엔드에서 filter 에러 방지)
     return NextResponse.json([], { status: 200 });
   }
 }
