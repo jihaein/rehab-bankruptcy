@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
+import { supabaseAdmin } from "@/lib/supabase";
+import { randomUUID } from "crypto";
 
 // 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
@@ -18,20 +18,6 @@ interface DiagnosisForm {
   dependents: string;
   additionalInfo: string;
   privacyConsent: boolean;
-}
-
-// 데이터 저장 디렉토리
-const dataDir = path.join(process.cwd(), "data");
-const submissionsFile = path.join(dataDir, "submissions.json");
-
-// 디렉토리 생성 및 파일 초기화
-function ensureDataDirectory() {
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  if (!fs.existsSync(submissionsFile)) {
-    fs.writeFileSync(submissionsFile, JSON.stringify([], null, 2));
-  }
 }
 
 // AI 판단 로직 (회생파산 자격요건 기준)
@@ -260,7 +246,13 @@ function evaluateEligibility(data: DiagnosisForm): {
 
 export async function POST(request: NextRequest) {
   try {
-    ensureDataDirectory();
+    if (!supabaseAdmin) {
+      console.error("Supabase admin client not available");
+      return NextResponse.json(
+        { error: "데이터베이스 연결에 실패했습니다." },
+        { status: 500 }
+      );
+    }
 
     const formData: DiagnosisForm = await request.json();
 
@@ -275,18 +267,37 @@ export async function POST(request: NextRequest) {
     // AI 판단 수행
     const result = evaluateEligibility(formData);
 
-    // 제출 정보 저장
-    const submission = {
-      ...formData,
-      result,
-      submittedAt: new Date().toISOString(),
+    // Supabase에 제출 정보 저장
+    const submissionId = randomUUID();
+    const submissionData = {
+      id: submissionId,
+      name: formData.name,
+      phone: formData.phone,
+      age_group: formData.ageGroup,
+      total_debt: formData.totalDebt,
+      debt_increase: formData.debtIncrease,
+      monthly_income: formData.monthlyIncome,
+      seizure_status: formData.seizureStatus,
+      assets: formData.assets,
+      creditors: formData.creditors,
+      dependents: formData.dependents,
+      eligible: result.eligible,
+      explanation: result.explanation,
+      recommendation: result.recommendation,
+      submitted_at: new Date().toISOString(),
     };
 
-    const existingData = JSON.parse(
-      fs.readFileSync(submissionsFile, "utf-8")
-    );
-    existingData.push(submission);
-    fs.writeFileSync(submissionsFile, JSON.stringify(existingData, null, 2));
+    const { error: insertError } = await supabaseAdmin
+      .from('submissions')
+      .insert(submissionData);
+
+    if (insertError) {
+      console.error("Error saving submission to Supabase:", insertError);
+      return NextResponse.json(
+        { error: "진단 결과 저장 중 오류가 발생했습니다." },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(result);
   } catch (error) {

@@ -1,33 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir, readFile } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
 import { randomUUID } from "crypto";
 import { validateFileUpload } from "@/lib/middleware";
+import { supabaseAdmin } from "@/lib/supabase";
 
 // 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
-const uploadsDir = path.join(process.cwd(), "public", "uploads");
-const documentsFile = path.join(process.cwd(), "data", "documents.json");
-
-// 디렉토리 생성
-async function ensureDirectories() {
-  if (!existsSync(uploadsDir)) {
-    await mkdir(uploadsDir, { recursive: true });
-  }
-  const dataDir = path.join(process.cwd(), "data");
-  if (!existsSync(dataDir)) {
-    await mkdir(dataDir, { recursive: true });
-  }
-  if (!existsSync(documentsFile)) {
-    await writeFile(documentsFile, JSON.stringify([], null, 2));
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
-    await ensureDirectories();
+    console.log("[UPLOAD] === 문서 업로드 시작 ===");
+    console.log("[UPLOAD] supabaseAdmin 상태:", !!supabaseAdmin);
+
+    if (!supabaseAdmin) {
+      console.error("[UPLOAD] supabaseAdmin이 null입니다!");
+      return NextResponse.json(
+        { error: "Supabase가 설정되지 않았습니다." },
+        { status: 500 }
+      );
+    }
 
     const formData = await request.formData();
     const name = formData.get("name") as string;
@@ -35,6 +25,9 @@ export async function POST(request: NextRequest) {
     const privacyConsent = formData.get("privacyConsent") as string;
     const status = (formData.get("status") as string) || "draft";
     const documentTypes = formData.getAll("documentTypes") as string[];
+    
+    console.log("[UPLOAD] name:", name, "phone:", phone, "status:", status);
+    console.log("[UPLOAD] documentTypes:", documentTypes);
 
     if (!name || !phone) {
       return NextResponse.json(
@@ -57,10 +50,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 기존 문서 목록 읽기
-    const existingDocuments = existsSync(documentsFile)
-      ? JSON.parse(await readFile(documentsFile, "utf-8"))
-      : [];
+    // 고객 ID 찾기 (전화번호로)
+    const { data: customers, error: customerError } = await supabaseAdmin
+      .from('customers')
+      .select('id')
+      .eq('phone', phone)
+      .limit(1);
+
+    let customerId: string | null = null;
+    if (customers && customers.length > 0) {
+      customerId = customers[0].id;
+    }
+
+    // 기존 문서 목록 가져오기 (수정 이력용)
+    const { data: existingDocuments } = await supabaseAdmin
+      .from('documents')
+      .select('*')
+      .eq('phone', phone);
 
     const uploadedDocuments: any[] = [];
 
@@ -73,26 +79,28 @@ export async function POST(request: NextRequest) {
       }
 
       // 기존에 같은 서류 유형의 문서가 있는지 확인
-      const existingDocIndex = existingDocuments.findIndex(
-        (doc: any) => doc.phone === phone && doc.documentType === documentType
+      const existingDoc = existingDocuments?.find(
+        (doc: any) => doc.document_type === documentType
       );
 
       let editHistory: any[] = [];
-      if (existingDocIndex !== -1) {
-        const existingDoc = existingDocuments[existingDocIndex];
+      if (existingDoc) {
         // 기존 문서의 수정 이력 가져오기
-        editHistory = existingDoc.editHistory || [];
+        editHistory = existingDoc.edit_history || [];
         
         // 수정 로그 추가
         editHistory.push({
           action: "수정",
-          previousFileName: existingDoc.fileName,
-          previousSavedFileName: existingDoc.savedFileName,
-          modifiedAt: new Date().toISOString(),
+          previous_file_name: existingDoc.file_name,
+          previous_file_url: existingDoc.file_url,
+          modified_at: new Date().toISOString(),
         });
 
-        // 기존 문서 삭제 (파일은 나중에 정리)
-        existingDocuments.splice(existingDocIndex, 1);
+        // 기존 문서 삭제 (Supabase Storage의 파일은 나중에 정리)
+        await supabaseAdmin
+          .from('documents')
+          .delete()
+          .eq('id', existingDoc.id);
       }
 
       // 각 파일 저장
@@ -106,40 +114,84 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-
+        const fileBuffer = await file.arrayBuffer();
+        
         // 파일 확장자 추출
         const originalName = file.name;
-        const ext = path.extname(originalName);
+        const ext = originalName.substring(originalName.lastIndexOf('.'));
         const fileName = `${randomUUID()}${ext}`;
-        const filePath = path.join(uploadsDir, fileName);
+        
+        // Supabase Storage 경로: phone/fileName (한글 불가하므로 서류타입 제외)
+        const sanitizedPhone = phone.replace(/[^0-9]/g, "");
+        const filePath = `${sanitizedPhone}/${fileName}`;
 
-        // 파일 저장
-        await writeFile(filePath, buffer);
+        console.log("[UPLOAD] Storage 업로드 시작:", filePath, "contentType:", file.type);
+        
+        const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+          .from('documents')
+          .upload(filePath, fileBuffer, {
+            contentType: file.type,
+            upsert: false
+          });
 
-        const document = {
+        if (uploadError) {
+          console.error("[UPLOAD] Storage 업로드 실패:", uploadError);
+          return NextResponse.json(
+            { error: "파일 업로드 실패: " + uploadError.message },
+            { status: 500 }
+          );
+        }
+        
+        console.log("[UPLOAD] Storage 업로드 성공:", uploadData);
+        const documentData = {
           id: randomUUID(),
+          customer_id: customerId,
           name,
           phone,
-          documentType,
-          fileName: originalName,
-          savedFileName: fileName,
-          fileUrl: `/api/documents/file?file=${fileName}`,
-          uploadedAt: new Date().toISOString(),
+          document_type: documentType,
+          file_name: originalName,
+          file_url: filePath,
+          uploaded_at: new Date().toISOString(),
           status: status as "draft" | "submitted",
+          edit_history: editHistory.length > 0 ? editHistory : null,
+        };
+
+        const { data: insertedDoc, error: dbError } = await supabaseAdmin
+          .from('documents')
+          .insert([documentData])
+          .select()
+          .single();
+
+        if (dbError) {
+          console.error("[UPLOAD] DB 저장 실패:", dbError);
+          return NextResponse.json(
+            { error: "문서 정보 저장 실패: " + dbError.message },
+            { status: 500 }
+          );
+        }
+        
+        console.log("[UPLOAD] DB 저장 성공:", insertedDoc.id);
+
+        const document = {
+          id: insertedDoc.id,
+          name: insertedDoc.name,
+          phone: insertedDoc.phone,
+          documentType: insertedDoc.document_type,
+          fileName: insertedDoc.file_name,
+          savedFileName: fileName,
+          fileUrl: `/api/documents/file?file=${encodeURIComponent(insertedDoc.file_url)}`,
+          uploadedAt: insertedDoc.uploaded_at,
+          status: insertedDoc.status,
           privacyConsent: true,
-          editHistory: editHistory.length > 0 ? editHistory : undefined,
+          editHistory: insertedDoc.edit_history,
         };
 
         uploadedDocuments.push(document);
-        existingDocuments.push(document);
       }
     }
 
-    // 문서 목록 저장
-    await writeFile(documentsFile, JSON.stringify(existingDocuments, null, 2));
-
+    console.log("[UPLOAD] === 업로드 완료 ===", uploadedDocuments.length, "건");
+    
     return NextResponse.json({
       success: true,
       documents: uploadedDocuments,

@@ -1,40 +1,87 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
+import { supabaseAdmin } from "@/lib/supabase";
 
 // 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
-const uploadsDir = path.join(process.cwd(), "public", "uploads");
-
 export async function GET(request: NextRequest) {
   try {
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Supabase가 설정되지 않았습니다." },
+        { status: 500 }
+      );
+    }
+
     const { searchParams } = request.nextUrl;
     const fileName = searchParams.get("file");
+    const documentId = searchParams.get("id"); // 문서 ID로도 접근 가능
 
-    if (!fileName) {
+    if (!fileName && !documentId) {
       return NextResponse.json(
-        { error: "파일명이 필요합니다." },
+        { error: "파일명 또는 문서 ID가 필요합니다." },
         { status: 400 }
       );
     }
 
-    // 보안: 파일명에 경로 조작 방지
-    const safeFileName = path.basename(fileName);
-    const filePath = path.join(uploadsDir, safeFileName);
+    let filePath: string | null = null;
 
-    if (!existsSync(filePath)) {
+    // 문서 ID로 조회하는 경우
+    if (documentId) {
+      const { data: document, error: docError } = await supabaseAdmin
+        .from('documents')
+        .select('file_url')
+        .eq('id', documentId)
+        .single();
+
+      if (docError || !document) {
+        return NextResponse.json(
+          { error: "문서를 찾을 수 없습니다." },
+          { status: 404 }
+        );
+      }
+
+      // file_url에서 경로 추출 (전체 URL이면 경로만 추출)
+      filePath = document.file_url;
+      if (filePath.includes('supabase.co')) {
+        // signed URL인 경우, 경로 추출이 복잡하므로 직접 사용
+        // 또는 경로만 저장하도록 변경 필요
+        const pathMatch = filePath.match(/\/storage\/v1\/object\/sign\/documents\/(.+)\?/);
+        if (pathMatch) {
+          filePath = pathMatch[1];
+        }
+      }
+    } else {
+      // 파일명으로 직접 접근 (기존 방식 호환)
+      filePath = fileName;
+    }
+
+    if (!filePath) {
+      return NextResponse.json(
+        { error: "파일 경로를 찾을 수 없습니다." },
+        { status: 404 }
+      );
+    }
+
+    // Supabase Storage에서 파일 다운로드
+    const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+      .from('documents')
+      .download(filePath);
+
+    if (downloadError || !fileData) {
+      console.error("Storage download error:", downloadError);
       return NextResponse.json(
         { error: "파일을 찾을 수 없습니다." },
         { status: 404 }
       );
     }
 
-    const fileBuffer = await readFile(filePath);
-    const ext = path.extname(safeFileName).toLowerCase();
+    // 파일을 ArrayBuffer로 변환
+    const arrayBuffer = await fileData.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
     // Content-Type 설정
+    const ext = filePath.substring(filePath.lastIndexOf('.')).toLowerCase();
     let contentType = "application/octet-stream";
     if (ext === ".pdf") {
       contentType = "application/pdf";
@@ -46,7 +93,9 @@ export async function GET(request: NextRequest) {
       contentType = "image/gif";
     }
 
-    return new NextResponse(fileBuffer, {
+    const safeFileName = filePath.split('/').pop() || 'file';
+
+    return new NextResponse(buffer, {
       headers: {
         "Content-Type": contentType,
         "Content-Disposition": `inline; filename="${safeFileName}"`,

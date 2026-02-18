@@ -13,7 +13,7 @@
 
 - **Frontend**: Next.js 14 (App Router), React, TypeScript, Tailwind CSS
 - **Backend**: Next.js API Routes
-- **Data Storage**: JSON 파일 (로컬 저장)
+- **Data Storage**: Supabase (PostgreSQL + Storage)
 
 ## 설치 및 실행
 
@@ -23,15 +23,23 @@
 npm install
 ```
 
-### 2. 환경 변수 설정 (선택사항)
+### 2. 환경 변수 설정 (필수)
 
-`.env.local` 파일을 생성하고 다음 변수를 설정할 수 있습니다:
+`.env.local` 파일을 생성하고 다음 변수를 설정해야 합니다:
 
 ```env
-# 관리자 비밀번호 (기본값: "admin")
+# Supabase 설정 (필수)
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
+# 관리자 비밀번호 (필수)
 NEXT_PUBLIC_ADMIN_PASSWORD=your_password
 
-# 전화번호 (기본값: "010-0000-0000")
+# 세션 비밀번호 (필수)
+SESSION_SECRET=your_random_session_secret
+
+# 전화번호 (선택사항)
 NEXT_PUBLIC_PHONE_NUMBER=010-1234-5678
 ```
 
@@ -69,7 +77,10 @@ npm start
 
 ## 데이터 저장
 
-고객 정보는 `data/submissions.json` 파일에 저장됩니다. 이 파일은 자동으로 생성됩니다.
+모든 데이터는 Supabase 데이터베이스에 저장됩니다:
+- 고객 정보: `customers` 테이블
+- 진단 제출 내역: `submissions` 테이블
+- 업로드된 문서: `documents` 테이블 및 Storage
 
 ## AI 판단 기준
 

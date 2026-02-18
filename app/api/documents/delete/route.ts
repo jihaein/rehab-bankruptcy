@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile, writeFile, unlink } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
+import { supabaseAdmin } from "@/lib/supabase";
 
 // 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
-const documentsFile = path.join(process.cwd(), "data", "documents.json");
-const uploadsDir = path.join(process.cwd(), "public", "uploads");
-
 export async function DELETE(request: NextRequest) {
   try {
+    if (!supabaseAdmin) {
+      console.error("Supabase admin client not available");
+      return NextResponse.json(
+        { error: "Supabase가 설정되지 않았습니다." },
+        { status: 500 }
+      );
+    }
+
     const { searchParams } = request.nextUrl;
     const documentId = searchParams.get("id");
     const phone = searchParams.get("phone");
@@ -22,44 +25,85 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    if (!existsSync(documentsFile)) {
+    // 문서 정보 가져오기 (파일 경로 확인용)
+    const { data: document, error: fetchError } = await supabaseAdmin
+      .from('documents')
+      .select('file_url, id, phone')
+      .eq('id', documentId)
+      .eq('phone', phone)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error("Error fetching document:", fetchError);
+      return NextResponse.json(
+        { error: `문서 조회 중 오류가 발생했습니다: ${fetchError.message}` },
+        { status: 500 }
+      );
+    }
+
+    if (!document) {
       return NextResponse.json(
         { error: "문서를 찾을 수 없습니다." },
         { status: 404 }
       );
     }
 
-    const data = await readFile(documentsFile, "utf-8");
-    const documents = JSON.parse(data);
+    // Supabase Storage에서 파일 삭제
+    // file_url에서 경로 추출
+    let filePath: string | null = null;
+    
+    if (document.file_url) {
+      // signed URL인 경우 경로 추출
+      if (document.file_url.includes('supabase.co')) {
+        const pathMatch = document.file_url.match(/\/storage\/v1\/object\/sign\/documents\/(.+)\?/);
+        if (pathMatch) {
+          filePath = pathMatch[1];
+        }
+      } else if (document.file_url.startsWith('/api/documents/file')) {
+        // 기존 로컬 파일인 경우 (마이그레이션 전 데이터)
+        // 로컬 파일은 삭제하지 않고 메타데이터만 삭제
+        filePath = null; // Storage에서 삭제하지 않음
+      } else {
+        // 이미 경로인 경우
+        filePath = document.file_url;
+      }
 
-    const documentIndex = documents.findIndex(
-      (doc: any) => doc.id === documentId && doc.phone === phone
-    );
+      // Storage에서 파일 삭제 (Supabase Storage에 있는 경우만)
+      if (filePath && !document.file_url.startsWith('/api/')) {
+        const { error: storageError } = await supabaseAdmin.storage
+          .from('documents')
+          .remove([filePath]);
 
-    if (documentIndex === -1) {
-      return NextResponse.json(
-        { error: "문서를 찾을 수 없습니다." },
-        { status: 404 }
-      );
-    }
-
-    const document = documents[documentIndex];
-
-    // 파일 삭제
-    const filePath = path.join(uploadsDir, document.savedFileName);
-    if (existsSync(filePath)) {
-      try {
-        await unlink(filePath);
-      } catch (error) {
-        console.error("Error deleting file:", error);
-        // 파일 삭제 실패해도 문서는 삭제 진행
+        if (storageError) {
+          console.error("Storage delete error:", storageError);
+          // 파일 삭제 실패해도 문서는 삭제 진행
+        }
       }
     }
 
-    // 문서에서 삭제
-    documents.splice(documentIndex, 1);
+    // 데이터베이스에서 문서 삭제
+    const { error: deleteError, data: deleteData } = await supabaseAdmin
+      .from('documents')
+      .delete()
+      .eq('id', documentId)
+      .eq('phone', phone)
+      .select();
 
-    await writeFile(documentsFile, JSON.stringify(documents, null, 2));
+    if (deleteError) {
+      console.error("Database delete error:", deleteError);
+      return NextResponse.json(
+        { error: `문서 삭제 중 오류가 발생했습니다: ${deleteError.message}` },
+        { status: 500 }
+      );
+    }
+
+    // 삭제된 행이 없으면
+    if (!deleteData || deleteData.length === 0) {
+      return NextResponse.json(
+        { error: "삭제할 문서를 찾을 수 없습니다." },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

@@ -3,8 +3,8 @@ import "./globals.css";
 import Navigation from "@/components/Navigation";
 
 export const metadata: Metadata = {
-  title: "개인 회생파산 자가진단",
-  description: "개인 회생파산 자가진단 서비스",
+  title: "개인회생·파산 무료 진단",
+  description: "개인회생·파산 가능성을 무료로 진단받으세요",
 };
 
 export default function RootLayout({

@@ -1,35 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
 import { randomInt } from "crypto";
 import { adminAuthMiddleware } from "@/lib/middleware";
 import { hashPassword } from "@/lib/auth";
+import { supabaseAdmin } from "@/lib/supabase";
 
 // 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
-const dataDir = path.join(process.cwd(), "data");
-const customersFile = path.join(dataDir, "customers.json");
-
-async function ensureDataDirectory() {
-  try {
-    if (!existsSync(dataDir)) {
-      await mkdir(dataDir, { recursive: true });
-    }
-    if (!existsSync(customersFile)) {
-      await writeFile(customersFile, JSON.stringify([], null, 2), "utf-8");
-    }
-  } catch (error) {
-    console.error("Error ensuring data directory:", error);
-    // Vercel에서는 파일 시스템이 제한적일 수 있음
-    // 에러를 throw하지 않고 계속 진행 (파일이 없으면 빈 배열 반환)
-  }
+// 6자리 숫자 비밀번호 생성
+function generatePassword(): string {
+  return randomInt(100000, 1000000).toString();
 }
 
-// 4자리 비밀번호 생성
-function generatePassword(): string {
-  return randomInt(1000, 10000).toString().padStart(4, "0");
+// UUID 생성 (간단 버전)
+function generateId(): string {
+  return `customer_${Date.now()}_${randomInt(1000, 9999)}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -38,7 +23,12 @@ export async function POST(request: NextRequest) {
   if (authError) return authError;
   
   try {
-    await ensureDataDirectory();
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Supabase가 설정되지 않았습니다." },
+        { status: 500 }
+      );
+    }
 
     const body = await request.json();
     const { name, phone, birthDate, requiredDocuments } = body;
@@ -50,46 +40,84 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 기존 고객 목록 읽기
-    const existingCustomers = existsSync(customersFile)
-      ? JSON.parse(await readFile(customersFile, "utf-8"))
-      : [];
+    // 기존 고객 확인
+    const { data: existingCustomers, error: fetchError } = await supabaseAdmin
+      .from('customers')
+      .select('*')
+      .eq('phone', phone)
+      .limit(1);
 
-    // 이미 등록된 전화번호인지 확인
-    const existingCustomer = existingCustomers.find(
-      (c: any) => c.phone === phone
-    );
-
-    const password = generatePassword();
-    const hashedPassword = hashPassword(password); // 비밀번호 해싱
-    
-    const customer = {
-      id: existingCustomer?.id || `customer_${Date.now()}`,
-      name,
-      phone,
-      birthDate,
-      requiredDocuments,
-      password: hashedPassword, // 해싱된 비밀번호 저장
-      passwordPlain: password, // 문자 발송용으로 평문도 임시 저장 (나중에 제거 권장)
-      createdAt: existingCustomer?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (existingCustomer) {
-      // 기존 고객 업데이트
-      const index = existingCustomers.findIndex((c: any) => c.phone === phone);
-      existingCustomers[index] = customer;
-    } else {
-      // 새 고객 추가
-      existingCustomers.push(customer);
+    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error("Error checking existing customer:", fetchError);
+      return NextResponse.json(
+        { error: "고객 정보 확인 중 오류가 발생했습니다." },
+        { status: 500 }
+      );
     }
 
-    await writeFile(customersFile, JSON.stringify(existingCustomers, null, 2));
+    const existingCustomer = existingCustomers && existingCustomers.length > 0 
+      ? existingCustomers[0] 
+      : null;
+
+    const password = generatePassword();
+    const hashedPassword = hashPassword(password);
+    
+    const customerData = {
+      id: existingCustomer?.id || generateId(),
+      name,
+      phone,
+      birth_date: birthDate || null,
+      required_documents: requiredDocuments,
+      password: hashedPassword,
+      password_plain: password, // 문자 발송용 (나중에 제거 권장)
+      updated_at: new Date().toISOString(),
+    };
+
+    let result;
+    if (existingCustomer) {
+      // 기존 고객 업데이트
+      const { data, error } = await supabaseAdmin
+        .from('customers')
+        .update(customerData)
+        .eq('id', existingCustomer.id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error updating customer:", error);
+        return NextResponse.json(
+          { error: "고객 정보 업데이트 중 오류가 발생했습니다." },
+          { status: 500 }
+        );
+      }
+      result = data;
+    } else {
+      // 새 고객 추가
+      const newCustomer = {
+        ...customerData,
+        created_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabaseAdmin
+        .from('customers')
+        .insert([newCustomer])
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error creating customer:", error);
+        return NextResponse.json(
+          { error: "고객 정보 저장 중 오류가 발생했습니다." },
+          { status: 500 }
+        );
+      }
+      result = data;
+    }
 
     return NextResponse.json({
       success: true,
       customer: {
-        ...customer,
+        ...result,
         password, // 비밀번호는 응답에 포함 (문자 발송용)
       },
     });
@@ -107,56 +135,38 @@ export async function GET(request: NextRequest) {
   const authError = await adminAuthMiddleware(request);
   if (authError) return authError;
   
-  // 모든 에러를 잡아서 빈 배열 반환
   try {
-    // 디렉토리 생성 시도 (실패해도 계속 진행)
-    try {
-      await ensureDataDirectory();
-    } catch (dirError) {
-      console.error("Directory creation failed (may be read-only in Vercel):", dirError);
-      // 계속 진행 - 파일이 없으면 빈 배열 반환
+    if (!supabaseAdmin) {
+      console.error("Supabase admin client not available");
+      return NextResponse.json([], { status: 200 });
     }
 
-    // 파일이 없으면 빈 배열 반환
-    if (!existsSync(customersFile)) {
-      console.log("Customers file does not exist, returning empty array");
-      return NextResponse.json([]);
+    const { data, error } = await supabaseAdmin
+      .from('customers')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error("Supabase error:", error);
+      return NextResponse.json([], { status: 200 });
     }
 
-    let data: string;
-    try {
-      data = await readFile(customersFile, "utf-8");
-    } catch (readError) {
-      console.error("Error reading customers file:", readError);
-      // 파일 읽기 실패 시 빈 배열 반환
-      return NextResponse.json([]);
-    }
+    // Supabase에서 가져온 데이터를 기존 형식으로 변환 (필요시)
+    const customers = (data || []).map((customer: any) => ({
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      birthDate: customer.birth_date,
+      requiredDocuments: customer.required_documents || [],
+      password: customer.password_plain || "", // 평문 비밀번호 표시 (관리자용)
+      passwordPlain: customer.password_plain,
+      createdAt: customer.created_at,
+      updatedAt: customer.updated_at,
+    }));
 
-    // 빈 파일 처리
-    if (!data || data.trim() === "") {
-      return NextResponse.json([]);
-    }
-
-    let customers;
-    try {
-      customers = JSON.parse(data);
-    } catch (parseError) {
-      console.error("JSON parse error:", parseError);
-      // 파일이 손상되었거나 비어있을 수 있음
-      return NextResponse.json([]);
-    }
-
-    // 배열이 아닌 경우 빈 배열로 반환
-    if (!Array.isArray(customers)) {
-      console.error("Customers data is not an array:", customers);
-      return NextResponse.json([]);
-    }
-
-    // 관리자용이므로 비밀번호 포함하여 반환
     return NextResponse.json(customers);
   } catch (error: any) {
     console.error("Unexpected error reading customers:", error);
-    // 어떤 에러가 발생해도 빈 배열 반환 (프론트엔드에서 filter 에러 방지)
     return NextResponse.json([], { status: 200 });
   }
 }
@@ -167,7 +177,12 @@ export async function PUT(request: NextRequest) {
   if (authError) return authError;
   
   try {
-    await ensureDataDirectory();
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Supabase가 설정되지 않았습니다." },
+        { status: 500 }
+      );
+    }
 
     const body = await request.json();
     const { id, name, phone, birthDate, requiredDocuments, password } = body;
@@ -179,46 +194,62 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    if (!existsSync(customersFile)) {
-      return NextResponse.json(
-        { error: "등록된 고객이 없습니다." },
-        { status: 404 }
-      );
-    }
+    // 기존 고객 확인
+    const { data: existingCustomer, error: fetchError } = await supabaseAdmin
+      .from('customers')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    const data = await readFile(customersFile, "utf-8");
-    const customers = JSON.parse(data);
-
-    const customerIndex = customers.findIndex((c: any) => c.id === id);
-
-    if (customerIndex === -1) {
+    if (fetchError || !existingCustomer) {
       return NextResponse.json(
         { error: "고객을 찾을 수 없습니다." },
         { status: 404 }
       );
     }
 
-    // 기존 고객 정보 가져오기
-    const existingCustomer = customers[customerIndex];
-
     // 업데이트할 정보 구성
-    const updatedCustomer = {
-      ...existingCustomer,
-      name: name || existingCustomer.name,
-      phone: phone || existingCustomer.phone,
-      birthDate: birthDate || existingCustomer.birthDate,
-      requiredDocuments: requiredDocuments || existingCustomer.requiredDocuments,
-      password: password ? hashPassword(password) : existingCustomer.password, // 비밀번호가 제공되면 해싱하여 업데이트
-      updatedAt: new Date().toISOString(),
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
     };
 
-    customers[customerIndex] = updatedCustomer;
+    if (name) updateData.name = name;
+    if (phone) updateData.phone = phone;
+    if (birthDate !== undefined) updateData.birth_date = birthDate;
+    if (requiredDocuments) updateData.required_documents = requiredDocuments;
+    if (password) updateData.password = hashPassword(password);
 
-    await writeFile(customersFile, JSON.stringify(customers, null, 2));
+    const { data: updatedCustomer, error: updateError } = await supabaseAdmin
+      .from('customers')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error("Error updating customer:", updateError);
+      return NextResponse.json(
+        { error: "고객 정보 업데이트 중 오류가 발생했습니다." },
+        { status: 500 }
+      );
+    }
+
+    // 기존 형식으로 변환
+    const customer = {
+      id: updatedCustomer.id,
+      name: updatedCustomer.name,
+      phone: updatedCustomer.phone,
+      birthDate: updatedCustomer.birth_date,
+      requiredDocuments: updatedCustomer.required_documents || [],
+      password: updatedCustomer.password_plain || "", // 평문 비밀번호 표시 (관리자용)
+      passwordPlain: updatedCustomer.password_plain,
+      createdAt: updatedCustomer.created_at,
+      updatedAt: updatedCustomer.updated_at,
+    };
 
     return NextResponse.json({
       success: true,
-      customer: updatedCustomer,
+      customer,
     });
   } catch (error) {
     console.error("Error updating customer:", error);
@@ -235,7 +266,12 @@ export async function DELETE(request: NextRequest) {
   if (authError) return authError;
   
   try {
-    await ensureDataDirectory();
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Supabase가 설정되지 않았습니다." },
+        { status: 500 }
+      );
+    }
 
     const { searchParams } = request.nextUrl;
     const id = searchParams.get("id");
@@ -247,27 +283,18 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    if (!existsSync(customersFile)) {
+    const { error } = await supabaseAdmin
+      .from('customers')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error("Error deleting customer:", error);
       return NextResponse.json(
-        { error: "등록된 고객이 없습니다." },
-        { status: 404 }
+        { error: "고객 삭제 중 오류가 발생했습니다." },
+        { status: 500 }
       );
     }
-
-    const data = await readFile(customersFile, "utf-8");
-    const customers = JSON.parse(data);
-
-    const customerIndex = customers.findIndex((c: any) => c.id === id);
-
-    if (customerIndex === -1) {
-      return NextResponse.json(
-        { error: "고객을 찾을 수 없습니다." },
-        { status: 404 }
-      );
-    }
-
-    customers.splice(customerIndex, 1);
-    await writeFile(customersFile, JSON.stringify(customers, null, 2));
 
     return NextResponse.json({ success: true });
   } catch (error) {
