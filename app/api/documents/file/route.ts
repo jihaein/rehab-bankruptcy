@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 
       // file_url에서 경로 추출 (전체 URL이면 경로만 추출)
       filePath = document.file_url;
-      if (filePath.includes('supabase.co')) {
+      if (filePath && filePath.includes('supabase.co')) {
         // signed URL인 경우, 경로 추출이 복잡하므로 직접 사용
         // 또는 경로만 저장하도록 변경 필요
         const pathMatch = filePath.match(/\/storage\/v1\/object\/sign\/documents\/(.+)\?/);

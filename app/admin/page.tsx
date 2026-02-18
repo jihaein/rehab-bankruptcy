@@ -64,6 +64,8 @@ interface Document {
 export default function AdminPage() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [password, setPassword] = useState("");
@@ -105,7 +107,6 @@ export default function AdminPage() {
       if (response.ok && data.success) {
         setAuthenticated(true);
         setPassword("");
-        fetchSubmissions();
       } else {
         alert(data.error || "비밀번호가 올바르지 않습니다.");
       }
@@ -129,26 +130,26 @@ export default function AdminPage() {
   };
 
   const fetchDocuments = async () => {
+    setDocumentsLoading(true);
+    setDocumentsError(null);
     try {
-      const response = await fetch(`/api/documents?t=${Date.now()}`, {
-        credentials: "include",
-        cache: "no-store",
-        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }
-      });
-      if (response.status === 401) { setAuthenticated(false); alert("인증이 만료되었습니다. 다시 로그인해주세요."); return; }
+      const response = await fetch(`/api/documents?t=${Date.now()}`);
       if (!response.ok) {
-        const errText = await response.text();
-        console.error("Documents API error:", response.status, errText);
-        alert(`서류 목록 불러오기 실패 (${response.status})`);
-        setDocuments([]);
+        setDocumentsError(`서류 불러오기 실패 (${response.status})`);
         return;
       }
       const data = await response.json();
-      console.log("Fetched documents:", data);
-      if (Array.isArray(data)) { setDocuments(data); } else { setDocuments([]); }
+      if (Array.isArray(data)) {
+        setDocuments(data);
+      } else {
+        setDocuments([]);
+      }
     } catch (error) {
       console.error("Error fetching documents:", error);
+      setDocumentsError("서류를 불러오는 중 오류가 발생했습니다.");
       setDocuments([]);
+    } finally {
+      setDocumentsLoading(false);
     }
   };
 
@@ -168,14 +169,11 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (authenticated) {
-      if (activeTab === "documents") { setDocuments([]); fetchDocuments(); }
+      if (activeTab === "submissions") { fetchSubmissions(); }
+      else if (activeTab === "documents") { fetchDocuments(); }
       else if (activeTab === "register") { fetchCustomers(); }
     }
   }, [authenticated, activeTab]);
-
-  useEffect(() => {
-    if (authenticated && activeTab === "documents") { fetchDocuments(); }
-  }, [activeTab]);
 
   const documentTypes = ["신분증", "소득증명서", "부채증명서", "자산증명서", "은행거래내역", "기타"];
 
@@ -308,9 +306,8 @@ export default function AdminPage() {
     setTimeout(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, 100);
   };
 
-  const filteredSubmissions = submissions.filter((s) => s.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const filteredCustomers = customers.filter((c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  const filteredDocuments = documents.filter((d) => d.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredSubmissions = submissions.filter((s) => (s.name || "").toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredCustomers = customers.filter((c) => (c.name || "").toLowerCase().includes(searchQuery.toLowerCase()));
 
   // 로그인
   if (!authenticated) {
@@ -372,13 +369,13 @@ export default function AdminPage() {
 
           {/* Tabs */}
           <div className="flex px-8 border-b border-slate-200">
-            <button onClick={() => { setActiveTab("submissions"); setSearchQuery(""); fetchSubmissions(); }} className={tabClass("submissions")}>
+            <button onClick={() => { setActiveTab("submissions"); setSearchQuery(""); }} className={tabClass("submissions")}>
               진단 내역
             </button>
-            <button onClick={() => { setActiveTab("documents"); setSearchQuery(""); fetchDocuments(); }} className={tabClass("documents")}>
+            <button onClick={() => { setActiveTab("documents"); setSearchQuery(""); }} className={tabClass("documents")}>
               고객 서류
             </button>
-            <button onClick={() => { setActiveTab("register"); setSearchQuery(""); fetchCustomers(); }} className={tabClass("register")}>
+            <button onClick={() => { setActiveTab("register"); setSearchQuery(""); }} className={tabClass("register")}>
               고객 관리
             </button>
           </div>
@@ -495,60 +492,45 @@ export default function AdminPage() {
             {/* 고객 서류 탭 */}
             {activeTab === "documents" && (
               <>
-                {filteredDocuments.length === 0 ? (
+                {documentsLoading ? (
                   <div className="text-center py-16 text-slate-400 text-sm">
-                    {searchQuery ? "검색 결과가 없습니다." : "아직 제출된 서류가 없습니다."}
+                    서류를 불러오는 중...
+                  </div>
+                ) : documents.length === 0 ? (
+                  <div className="text-center py-16 text-slate-400 text-sm">
+                    {documentsError
+                      ? <span className="text-rose-500">{documentsError}</span>
+                      : "아직 제출된 서류가 없습니다."}
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {Object.entries(
-                      filteredDocuments.reduce((acc: any, doc) => {
-                        const key = `${doc.name}_${doc.phone}`;
-                        if (!acc[key]) { acc[key] = { name: doc.name, phone: doc.phone, documents: [] }; }
-                        acc[key].documents.push(doc);
-                        return acc;
-                      }, {})
-                    ).map(([key, customer]: [string, any]) => (
-                      <div key={key} className="border border-slate-200 rounded-lg p-6 hover:border-slate-300 transition-colors">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <h2 className="text-base font-bold text-slate-900">{customer.name}</h2>
-                            <p className="text-sm text-slate-500 mt-0.5">{customer.phone}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">{customer.documents.length}건</p>
-                          </div>
-                          <a href={`tel:${customer.phone}`} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-md transition-colors">
-                            전화하기
-                          </a>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {customer.documents.map((doc: Document) => (
-                            <div key={doc.id} className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                              <p className="text-sm font-semibold text-slate-900">{doc.documentType}</p>
-                              <p className="text-xs text-slate-500 mt-0.5 truncate">{doc.fileName}</p>
-                              <p className="text-xs text-slate-400 mt-0.5">{formatDate(doc.uploadedAt)}</p>
-                              {doc.editHistory && doc.editHistory.length > 0 && (
-                                <div className="mt-2 pt-2 border-t border-slate-200">
-                                  <p className="text-xs text-slate-400 mb-0.5">수정 이력</p>
-                                  {doc.editHistory.map((h, i) => (
-                                    <p key={i} className="text-xs text-slate-400">{h.action} · {formatDate(h.modifiedAt)}</p>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="flex gap-2 mt-3">
-                                <a
-                                  href={doc.fileUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex-1 text-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-md transition-colors"
-                                >
-                                  보기
-                                </a>
-                                <button onClick={() => handleDeleteDocument(doc.id, doc.phone)} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-md transition-colors">
-                                  삭제
-                                </button>
-                              </div>
+                  <div className="space-y-3">
+                    {documents
+                      .filter((d) => !searchQuery || (d.name || "").toLowerCase().includes(searchQuery.toLowerCase()))
+                      .map((doc) => (
+                      <div key={doc.id} className="border border-slate-200 rounded-lg p-5 hover:border-slate-300 transition-colors">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="text-sm font-bold text-slate-900">{doc.name || "이름없음"}</h3>
+                              <span className="text-xs text-slate-400">{doc.phone || ""}</span>
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded">{doc.documentType || "미분류"}</span>
                             </div>
-                          ))}
+                            <p className="text-xs text-slate-500 truncate">{doc.fileName || ""}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleString("ko-KR") : ""}</p>
+                          </div>
+                          <div className="flex gap-2 ml-4 shrink-0">
+                            <a
+                              href={doc.fileUrl || "#"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-md transition-colors"
+                            >
+                              보기
+                            </a>
+                            <button onClick={() => handleDeleteDocument(doc.id, doc.phone)} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-md transition-colors">
+                              삭제
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}

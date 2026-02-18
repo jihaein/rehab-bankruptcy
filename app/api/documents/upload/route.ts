@@ -8,11 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[UPLOAD] === 문서 업로드 시작 ===");
-    console.log("[UPLOAD] supabaseAdmin 상태:", !!supabaseAdmin);
-
     if (!supabaseAdmin) {
-      console.error("[UPLOAD] supabaseAdmin이 null입니다!");
       return NextResponse.json(
         { error: "Supabase가 설정되지 않았습니다." },
         { status: 500 }
@@ -25,9 +21,6 @@ export async function POST(request: NextRequest) {
     const privacyConsent = formData.get("privacyConsent") as string;
     const status = (formData.get("status") as string) || "draft";
     const documentTypes = formData.getAll("documentTypes") as string[];
-    
-    console.log("[UPLOAD] name:", name, "phone:", phone, "status:", status);
-    console.log("[UPLOAD] documentTypes:", documentTypes);
 
     if (!name || !phone) {
       return NextResponse.json(
@@ -125,8 +118,6 @@ export async function POST(request: NextRequest) {
         const sanitizedPhone = phone.replace(/[^0-9]/g, "");
         const filePath = `${sanitizedPhone}/${fileName}`;
 
-        console.log("[UPLOAD] Storage 업로드 시작:", filePath, "contentType:", file.type);
-        
         const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
           .from('documents')
           .upload(filePath, fileBuffer, {
@@ -135,14 +126,12 @@ export async function POST(request: NextRequest) {
           });
 
         if (uploadError) {
-          console.error("[UPLOAD] Storage 업로드 실패:", uploadError);
           return NextResponse.json(
             { error: "파일 업로드 실패: " + uploadError.message },
             { status: 500 }
           );
         }
         
-        console.log("[UPLOAD] Storage 업로드 성공:", uploadData);
         const documentData = {
           id: randomUUID(),
           customer_id: customerId,
@@ -163,15 +152,12 @@ export async function POST(request: NextRequest) {
           .single();
 
         if (dbError) {
-          console.error("[UPLOAD] DB 저장 실패:", dbError);
           return NextResponse.json(
             { error: "문서 정보 저장 실패: " + dbError.message },
             { status: 500 }
           );
         }
         
-        console.log("[UPLOAD] DB 저장 성공:", insertedDoc.id);
-
         const document = {
           id: insertedDoc.id,
           name: insertedDoc.name,
@@ -190,8 +176,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log("[UPLOAD] === 업로드 완료 ===", uploadedDocuments.length, "건");
-    
     return NextResponse.json({
       success: true,
       documents: uploadedDocuments,

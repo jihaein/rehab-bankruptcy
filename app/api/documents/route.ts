@@ -6,12 +6,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("[DOCS GET] supabaseAdmin 상태:", !!supabaseAdmin);
-    
     if (!supabaseAdmin) {
-      console.error("[DOCS GET] supabaseAdmin이 null! SUPABASE_SERVICE_ROLE_KEY 환경변수를 확인하세요.");
       return NextResponse.json(
-        { error: "서버 설정 오류: Supabase 연결이 되지 않았습니다. 환경변수를 확인하세요." },
+        { error: "서버 설정 오류: Supabase 연결이 되지 않았습니다." },
         { status: 500 }
       );
     }
@@ -36,11 +33,8 @@ export async function GET(request: NextRequest) {
     query = query.order('uploaded_at', { ascending: false });
 
     const { data: documents, error } = await query;
-    
-    console.log("[DOCS GET] 쿼리 결과 - 문서 수:", documents?.length ?? 'null', "에러:", error?.message ?? '없음');
 
     if (error) {
-      console.error("[DOCS GET] Supabase 쿼리 에러:", error);
       return NextResponse.json(
         { error: "서류 조회 실패: " + error.message },
         { status: 500 }

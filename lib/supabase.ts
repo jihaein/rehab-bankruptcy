@@ -20,17 +20,20 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// 클라이언트 사이드용 (브라우저에서 사용)
-// 공개 키를 사용하므로 제한된 권한만 가짐
+const noStoreGlobalFetch = {
+  global: {
+    fetch: (url: RequestInfo | URL, options: RequestInit = {}) => {
+      return fetch(url, { ...options, cache: 'no-store' as RequestCache });
+    },
+  },
+};
+
 export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, noStoreGlobalFetch)
   : null;
 
-// 서버 사이드용 (API 라우트에서 사용)
-// 서비스 키를 사용하므로 모든 권한을 가짐 (관리자 권한)
-// ⚠️ 이 키는 절대 브라우저에 노출되면 안 됩니다!
 export const supabaseAdmin = supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey)
+  ? createClient(supabaseUrl, supabaseServiceKey, noStoreGlobalFetch)
   : null;
 
 // supabaseAdmin이 없으면 경고 (선택사항)
