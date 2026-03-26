@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireAdminAuth, requireCustomerAuth, normalizePhone } from "@/lib/auth";
 
-// 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
 export async function DELETE(request: NextRequest) {
+  const adminAuth = await requireAdminAuth(request);
+  const customerAuth = await requireCustomerAuth(request);
+
+  if (!adminAuth.authorized && !customerAuth.authorized) {
+    return NextResponse.json(
+      { error: "인증이 필요합니다." },
+      { status: 401 }
+    );
+  }
+
   try {
     if (!supabaseAdmin) {
       console.error("Supabase admin client not available");
@@ -16,12 +26,20 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = request.nextUrl;
     const documentId = searchParams.get("id");
-    const phone = searchParams.get("phone");
+    const rawPhone = searchParams.get("phone");
+    const phone = rawPhone ? normalizePhone(rawPhone) : null;
 
     if (!documentId || !phone) {
       return NextResponse.json(
         { error: "문서 ID와 전화번호가 필요합니다." },
         { status: 400 }
+      );
+    }
+
+    if (customerAuth.authorized && customerAuth.phone !== phone) {
+      return NextResponse.json(
+        { error: "본인의 서류만 삭제할 수 있습니다." },
+        { status: 403 }
       );
     }
 

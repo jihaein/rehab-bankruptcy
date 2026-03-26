@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireAdminAuth, requireCustomerAuth, normalizePhone } from "@/lib/auth";
 
-// 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
@@ -14,14 +14,32 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = request.nextUrl;
-    const phone = searchParams.get("phone");
+    const rawPhone = searchParams.get("phone");
+    const phone = rawPhone ? normalizePhone(rawPhone) : null;
     const name = searchParams.get("name");
+
+    if (phone) {
+      const customerAuth = await requireCustomerAuth(request);
+      if (!customerAuth.authorized || customerAuth.phone !== phone) {
+        return NextResponse.json(
+          { error: "인증이 필요합니다. 다시 로그인해주세요." },
+          { status: 401 }
+        );
+      }
+    } else {
+      const adminAuth = await requireAdminAuth(request);
+      if (!adminAuth.authorized) {
+        return NextResponse.json(
+          { error: "관리자 인증이 필요합니다." },
+          { status: 401 }
+        );
+      }
+    }
 
     let query = supabaseAdmin
       .from('documents')
       .select('*');
 
-    // 필터링 (전화번호 또는 이름으로)
     if (phone) {
       query = query.eq('phone', phone);
     }
@@ -29,7 +47,6 @@ export async function GET(request: NextRequest) {
       query = query.eq('name', name);
     }
 
-    // 최신순으로 정렬
     query = query.order('uploaded_at', { ascending: false });
 
     const { data: documents, error } = await query;
@@ -41,12 +58,40 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 기존 형식으로 변환 (프론트엔드 호환성)
-    const formattedDocuments = (documents || []).map((doc: any) => {
+    const isCustomerRequest = !!phone;
+    const docs = documents || [];
+
+    let signedUrlMap: Record<string, string> = {};
+
+    if (isCustomerRequest) {
+      const storagePaths = docs
+        .map((d: any) => d.file_url || '')
+        .filter((p: string) => p && !p.startsWith('http'));
+
+      if (storagePaths.length > 0) {
+        const { data: signedUrls } = await supabaseAdmin!.storage
+          .from('documents')
+          .createSignedUrls(storagePaths, 3600);
+
+        if (signedUrls) {
+          signedUrls.forEach((item: any) => {
+            if (item.signedUrl && item.path) {
+              signedUrlMap[item.path] = item.signedUrl;
+            }
+          });
+        }
+      }
+    }
+
+    const formattedDocuments = docs.map((doc: any) => {
       const rawUrl = doc.file_url || '';
-      const fileUrl = rawUrl.startsWith('/api/') || rawUrl.startsWith('http')
-        ? rawUrl
-        : `/api/documents/file?file=${encodeURIComponent(rawUrl)}`;
+
+      let fileUrl: string;
+      if (isCustomerRequest && signedUrlMap[rawUrl]) {
+        fileUrl = signedUrlMap[rawUrl];
+      } else {
+        fileUrl = `/api/documents/file?id=${doc.id}`;
+      }
 
       return {
         id: doc.id,
@@ -63,7 +108,6 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // 캐시 방지 헤더 추가
     const response = NextResponse.json(formattedDocuments);
     response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     response.headers.set('Pragma', 'no-cache');

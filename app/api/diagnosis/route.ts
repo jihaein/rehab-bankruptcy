@@ -118,7 +118,7 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
     score += 3;
     factorAnalysis.push({
       label: "총 채무 규모", value: labels.debt,
-      analysis: "채무 규모가 상당합니다. 개인회생의 경우 무담보채무 5억원, 담보채무 10억원 한도가 있으므로 채무 구성에 따라 적용 여부가 달라질 수 있습니다. 자력 상환이 어려운 수준이라면 법적 절차를 적극 검토할 필요가 있습니다.",
+      analysis: "채무 규모가 상당합니다. 개인회생의 경우 무담보채무 10억원, 담보채무 15억원 한도가 있으므로 채무 구성에 따라 적용 여부가 달라질 수 있습니다. 자력 상환이 어려운 수준이라면 법적 절차를 적극 검토할 필요가 있습니다.",
       impact: 'favorable'
     });
     rehabPersonal.push("채무액이 크므로 변제계획을 통해 상당 부분 감면받을 수 있습니다");
@@ -229,20 +229,20 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
     score += 3;
     factorAnalysis.push({
       label: "압류·독촉 상태", value: labels.seizure,
-      analysis: "압류가 진행 중인 긴급한 상황입니다. 개인회생 또는 파산 신청과 동시에 금지명령신청서를 제출하면, 통상 3일 이내에 법원에서 금지명령이 내려져 압류와 독촉으로부터 즉시 벗어날 수 있습니다. 빠른 법적 대응이 중요합니다.",
+      analysis: "압류가 진행 중인 긴급한 상황입니다. 개인회생의 경우, 신청과 동시에 금지명령신청서를 제출하면 통상 3일 이내에 법원의 금지명령이 내려져 압류·독촉에서 벗어날 수 있습니다. 파산의 경우, 법원의 파산선고가 내려지면 채권자의 압류·추심이 중단됩니다. 빠른 법적 대응이 중요합니다.",
       impact: 'favorable'
     });
-    rehabPersonal.push("회생 신청 시 금지명령을 통해 압류·독촉을 즉시 중단시킬 수 있습니다");
-    bankruptcyPersonal.push("파산 신청 시 금지명령을 통해 압류·독촉을 즉시 중단시킬 수 있습니다");
+    rehabPersonal.push("개인회생 신청 시 금지명령을 통해 통상 3일 이내에 압류·독촉을 중단시킬 수 있습니다");
+    bankruptcyPersonal.push("파산선고가 내려지면 채권자의 압류·추심이 중단됩니다");
   } else if (seizureStatus === "collection") {
     score += 1;
     factorAnalysis.push({
       label: "압류·독촉 상태", value: labels.seizure,
-      analysis: "독촉을 받고 있는 상태로, 대응하지 않으면 향후 압류로 이어질 수 있습니다. 개인회생 또는 파산 신청과 함께 금지명령신청서를 제출하면, 통상 3일 이내에 법원의 금지명령이 내려져 독촉과 추심으로부터 벗어날 수 있습니다.",
+      analysis: "독촉을 받고 있는 상태로, 대응하지 않으면 향후 압류로 이어질 수 있습니다. 개인회생의 경우, 신청과 함께 금지명령신청서를 제출하면 통상 3일 이내에 법원의 금지명령이 내려져 독촉·추심에서 벗어날 수 있습니다. 파산의 경우, 파산선고 시 채권자의 독촉·추심이 중단됩니다.",
       impact: 'neutral'
     });
-    rehabPersonal.push("회생 신청 시 금지명령으로 독촉·추심을 중단시킬 수 있습니다");
-    bankruptcyPersonal.push("파산 신청 시 금지명령으로 독촉·추심을 중단시킬 수 있습니다");
+    rehabPersonal.push("개인회생 신청 시 금지명령으로 통상 3일 이내에 독촉·추심을 중단시킬 수 있습니다");
+    bankruptcyPersonal.push("파산선고가 내려지면 채권자의 독촉·추심이 중단됩니다");
   } else {
     score -= 1;
     factorAnalysis.push({
@@ -379,7 +379,7 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
   // --- 다음 단계 ---
   const nextSteps: string[] = [];
   if (seizureStatus === "seizure" || seizureStatus === "collection") {
-    nextSteps.push("압류·독촉을 받고 계시므로 가능한 빨리 전문가에게 연락하세요. 신청과 동시에 금지명령신청서를 제출하면 통상 3일 이내에 압류·독촉이 중단됩니다.");
+    nextSteps.push("압류·독촉을 받고 계시므로 가능한 빨리 전문가에게 연락하세요. 개인회생의 경우 금지명령신청서를 제출하면 통상 3일 이내에 중단되며, 파산의 경우 파산선고 시 중단됩니다.");
   }
   nextSteps.push("전문 법무사와의 무료 상담을 통해 정확한 자격 요건과 예상 결과를 확인하세요.");
   nextSteps.push("상담 전 소득증명서, 신용정보조회서(채무증명), 재산 관련 서류를 준비하시면 보다 정확한 상담이 가능합니다.");
@@ -398,7 +398,7 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
       process: [
         "법무사 상담 및 서류 준비",
         "법원에 개인회생 신청",
-        "개시결정 (신청 후 약 1~2개월) → 채권자 추심·압류 중단",
+        "개시결정 (신청 후 약 1~2개월) — 금지명령 신청 시 통상 3일 이내 압류·추심 중단",
         "변제계획안 제출 및 채권자 이의 기간",
         "법원 인가결정 (신청 후 약 3~6개월)",
         "변제계획에 따라 매월 변제금 납부 (3~5년간)",
@@ -407,7 +407,7 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
       pros: [
         "주택, 차량 등 재산을 유지하면서 진행 가능",
         "채무의 상당 부분(경우에 따라 최대 90%)을 감면받을 수 있음",
-        "채권자의 압류·추심이 중단됨",
+        "금지명령 신청 시 통상 3일 이내에 채권자의 압류·추심이 중단됨",
         "변제 완료 시 잔여 채무 전액 면책",
         "신용 회복이 비교적 빠름",
       ],
@@ -419,7 +419,7 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
       ],
       requirements: [
         "급여소득 또는 영업소득 등 정기적 수입이 있을 것",
-        "무담보채무 5억원, 담보채무 10억원 이하",
+        "무담보채무 10억원, 담보채무 15억원 이하",
         "채무를 변제할 수 있는 가용소득이 있을 것",
       ],
     },
@@ -440,7 +440,7 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
         "법무사 상담 및 서류 준비",
         "법원에 파산·면책 동시 신청",
         "파산심문기일 (신청 후 약 2~4개월)",
-        "파산 선고 → 채권자 추심·압류 중단",
+        "파산선고 → 채권자 추심·압류 중단",
         "면책심문기일 (파산 선고 후 약 2~3개월)",
         "면책 결정 → 대부분의 채무 면제",
         "면책 확정 (이의 없으면 약 2주 후)",
@@ -449,7 +449,7 @@ function evaluateEligibility(data: DiagnosisForm): DiagnosisResult {
         "대부분의 채무를 전액 면제받을 수 있음",
         "별도의 변제 기간 없이 면책 후 새 출발 가능",
         "소득이 없거나 매우 낮아도 신청 가능",
-        "파산 신청 시 채권자의 압류·추심이 중단됨",
+        "파산선고 시 채권자의 압류·추심이 중단됨",
       ],
       cons: [
         "자유재산을 제외한 재산이 환가(처분)될 수 있음",
@@ -502,17 +502,30 @@ export async function POST(request: NextRequest) {
 
     const formData: DiagnosisForm = await request.json();
 
-    if (!formData.privacyConsent) {
+    const consent = (formData as any).consent;
+    if (!consent?.privacyConsent || !consent?.sensitiveInfoConsent || !consent?.overseasTransferConsent) {
       return NextResponse.json(
-        { error: "개인정보 수집 및 이용에 동의해주세요." },
+        { error: "필수 동의 항목에 모두 동의해주세요." },
         { status: 400 }
       );
     }
 
+    const consentMetadata = {
+      privacyConsent: true,
+      sensitiveInfoConsent: true,
+      overseasTransferConsent: true,
+      marketingConsent: !!consent.marketingConsent,
+      consentVersion: "2026-02-18-v1",
+      consentTimestamp: new Date().toISOString(),
+      consentIp: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+        || request.headers.get("x-real-ip")
+        || "unknown",
+    };
+
     const result = evaluateEligibility(formData);
 
     const submissionId = randomUUID();
-    const submissionData = {
+    const submissionData: Record<string, any> = {
       id: submissionId,
       name: formData.name,
       phone: formData.phone,
@@ -528,6 +541,7 @@ export async function POST(request: NextRequest) {
       explanation: result.explanation,
       recommendation: result.recommendation,
       submitted_at: new Date().toISOString(),
+      consent_metadata: consentMetadata,
     };
 
     const { error: insertError } = await supabaseAdmin

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import PrivacyConsentCheckbox, { type ConsentState } from "@/components/PrivacyConsentCheckbox";
 
 interface Document {
   id: string;
@@ -41,7 +42,12 @@ export default function DocumentsPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [uploadedDocuments, setUploadedDocuments] = useState<Document[]>([]);
   const [documentUploads, setDocumentUploads] = useState<Map<string, File[]>>(new Map());
-  const [privacyConsent, setPrivacyConsent] = useState(false);
+  const [consent, setConsent] = useState<ConsentState>({
+    privacyConsent: false,
+    sensitiveInfoConsent: false,
+    overseasTransferConsent: false,
+    marketingConsent: false,
+  });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -51,7 +57,7 @@ export default function DocumentsPage() {
   const fetchUploadedDocuments = async () => {
     if (!customer) return;
     try {
-      const response = await fetch(`/api/documents?phone=${customer.phone}&name=${customer.name}`);
+      const response = await fetch(`/api/documents?phone=${customer.phone}&name=${customer.name}`, { credentials: "include" });
       const data = await response.json();
       setUploadedDocuments(data);
       const uploadsMap = new Map<string, File[]>();
@@ -77,6 +83,7 @@ export default function DocumentsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: loginPhone, password: loginPassword }),
+        credentials: "include",
       });
       const data = await response.json();
       if (response.ok) {
@@ -94,15 +101,20 @@ export default function DocumentsPage() {
     }
   };
 
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [reuploadingTypes, setReuploadingTypes] = useState<Set<string>>(new Set());
+
   const handleFileSelect = (documentType: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const fileArray = Array.from(files);
     setDocumentUploads((prev) => {
       const newMap = new Map(prev);
-      newMap.set(documentType, fileArray);
+      const existing = newMap.get(documentType) || [];
+      newMap.set(documentType, [...existing, ...fileArray]);
       return newMap;
     });
+    e.target.value = "";
   };
 
   const removeFile = (documentType: string, index: number) => {
@@ -124,8 +136,8 @@ export default function DocumentsPage() {
       setMessage({ type: "error", text: "로그인이 필요합니다." });
       return;
     }
-    if (!privacyConsent) {
-      setMessage({ type: "error", text: "개인정보 수집 및 이용에 동의해주세요." });
+    if (!consent.privacyConsent || !consent.sensitiveInfoConsent || !consent.overseasTransferConsent) {
+      setMessage({ type: "error", text: "필수 동의 항목에 모두 동의해주세요." });
       return;
     }
     if (documentUploads.size === 0) {
@@ -138,13 +150,16 @@ export default function DocumentsPage() {
       const formData = new FormData();
       formData.append("name", customer.name);
       formData.append("phone", customer.phone);
-      formData.append("privacyConsent", "true");
+      formData.append("privacyConsent", consent.privacyConsent ? "true" : "false");
+      formData.append("sensitiveInfoConsent", consent.sensitiveInfoConsent ? "true" : "false");
+      formData.append("overseasTransferConsent", consent.overseasTransferConsent ? "true" : "false");
+      formData.append("marketingConsent", consent.marketingConsent ? "true" : "false");
       formData.append("status", isSubmit ? "submitted" : "draft");
       for (const [documentType, files] of documentUploads.entries()) {
         formData.append("documentTypes", documentType);
         files.forEach((file) => { formData.append(`files_${documentType}`, file); });
       }
-      const response = await fetch("/api/documents/upload", { method: "POST", body: formData });
+      const response = await fetch("/api/documents/upload", { method: "POST", body: formData, credentials: "include" });
       const data = await response.json();
       console.log("[서류제출] 응답 status:", response.status, "data:", data);
       if (response.ok) {
@@ -174,7 +189,7 @@ export default function DocumentsPage() {
     if (!confirm("정말 이 서류를 삭제하시겠습니까?")) return;
     setDeletingDocId(docId);
     try {
-      const response = await fetch(`/api/documents/delete?id=${docId}&phone=${customer.phone}`, { method: "DELETE" });
+      const response = await fetch(`/api/documents/delete?id=${docId}&phone=${customer.phone}`, { method: "DELETE", credentials: "include" });
       const data = await response.json();
       if (response.ok) {
         setMessage({ type: "success", text: "서류가 삭제되었습니다." });
@@ -358,6 +373,9 @@ export default function DocumentsPage() {
               {customer?.requiredDocuments.map((docType) => {
                 const selectedFiles = documentUploads.get(docType) || [];
                 const uploadedDoc = getUploadedDocument(docType);
+                const isReuploading = reuploadingTypes.has(docType);
+                const showUploader = !uploadedDoc || isReuploading;
+
                 return (
                   <div key={docType} className="border border-slate-200 rounded-lg p-5">
                     <div className="flex items-center justify-between mb-3">
@@ -372,51 +390,86 @@ export default function DocumentsPage() {
                         </span>
                       )}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1">파일 선택</label>
+
+                    {uploadedDoc && !isReuploading ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+                          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shrink-0">
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-emerald-800 truncate">{uploadedDoc.fileName}</p>
+                            <p className="text-xs text-emerald-600">{uploadedDoc.uploadedAt ? new Date(uploadedDoc.uploadedAt).toLocaleDateString("ko-KR") : ""} 제출</p>
+                          </div>
+                          <a
+                            href={uploadedDoc.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-emerald-700 font-semibold underline underline-offset-2 shrink-0"
+                          >
+                            보기
+                          </a>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`"${docType}" 서류를 삭제하고 다시 제출하시겠습니까?`)) {
+                              handleDeleteDocument(uploadedDoc.id);
+                              setReuploadingTypes((prev) => new Set(prev).add(docType));
+                            }
+                          }}
+                          className="w-full py-2.5 text-sm font-medium text-slate-500 hover:text-rose-600 border border-slate-200 hover:border-rose-300 rounded-lg transition-colors"
+                        >
+                          다시 제출하기
+                        </button>
+                      </div>
+                    ) : (
+                      <>
                         <input
+                          ref={(el) => { if (el) fileInputRefs.current[docType] = el; }}
                           type="file"
                           accept="image/*,.pdf"
                           multiple
                           onChange={(e) => handleFileSelect(docType, e)}
-                          className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 border border-slate-200 rounded-lg p-1"
+                          className="hidden"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-500 mb-1">카메라 촬영</label>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          onChange={(e) => handleFileSelect(docType, e)}
-                          className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 border border-indigo-200 rounded-lg p-1 bg-indigo-50/30"
-                        />
-                      </div>
-                    </div>
-                    {selectedFiles.length > 0 && (
-                      <div className="mt-3 space-y-1.5">
-                        {selectedFiles.map((file, index) => (
-                          <div key={index} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg border border-slate-100">
-                            <span className="text-xs text-slate-600 truncate">{file.name}</span>
-                            <button onClick={() => removeFile(docType, index)} className="text-rose-500 hover:text-rose-700 text-xs font-medium ml-2 shrink-0">
-                              삭제
+                        <button
+                          type="button"
+                          onClick={() => fileInputRefs.current[docType]?.click()}
+                          className="w-full flex items-center justify-center gap-2.5 py-4 px-4 border-2 border-dashed border-slate-300 rounded-lg text-sm font-medium text-slate-600 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/50 transition-colors active:bg-indigo-50"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+                          </svg>
+                          사진 촬영 또는 파일 선택
+                        </button>
+                        {selectedFiles.length > 0 && (
+                          <div className="mt-3 space-y-1.5">
+                            <p className="text-xs font-medium text-slate-500">{selectedFiles.length}개 파일 선택됨</p>
+                            {selectedFiles.map((file, index) => (
+                              <div key={index} className="flex items-center justify-between p-2.5 bg-emerald-50 rounded-lg border border-emerald-100">
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <span className="text-emerald-600 text-xs shrink-0">✓</span>
+                                  <span className="text-xs text-slate-700 truncate">{file.name}</span>
+                                  <span className="text-[10px] text-slate-400 shrink-0">{(file.size / 1024).toFixed(0)}KB</span>
+                                </div>
+                                <button onClick={() => removeFile(docType, index)} className="text-slate-400 hover:text-rose-500 transition-colors ml-2 shrink-0">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => fileInputRefs.current[docType]?.click()}
+                              className="w-full py-2 text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+                            >
+                              + 파일 추가
                             </button>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                    {uploadedDoc && (
-                      <div className="mt-3 pt-3 border-t border-slate-100">
-                        <a
-                          href={uploadedDoc.fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                        >
-                          기존 파일 보기: {uploadedDoc.fileName}
-                        </a>
-                      </div>
+                        )}
+                      </>
                     )}
                   </div>
                 );
@@ -424,23 +477,13 @@ export default function DocumentsPage() {
             </div>
 
             {/* 동의 */}
-            <div className="mt-6 bg-amber-50 border border-amber-200 p-4 rounded-lg">
-              <div className="flex items-start">
-                <input
-                  type="checkbox"
-                  id="docPrivacyConsent"
-                  checked={privacyConsent}
-                  onChange={(e) => setPrivacyConsent(e.target.checked)}
-                  className="mt-0.5 mr-3 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  required
-                />
-                <label htmlFor="docPrivacyConsent" className="text-sm text-slate-700">
-                  <span className="font-semibold text-rose-600">[필수]</span> 개인정보 수집 및 이용에 동의합니다.
-                  <span className="text-xs text-slate-500 mt-1 block leading-relaxed">
-                    업로드하신 서류와 개인정보는 상담 및 절차 진행 목적으로만 사용됩니다.
-                  </span>
-                </label>
-              </div>
+            <div className="mt-6">
+              <PrivacyConsentCheckbox
+                idPrefix="documents"
+                consent={consent}
+                onChange={setConsent}
+                variant="documents"
+              />
             </div>
 
             {message && (

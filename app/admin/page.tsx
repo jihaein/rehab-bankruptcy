@@ -94,6 +94,9 @@ export default function AdminPage() {
   const [updating, setUpdating] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [editCustomDocumentName, setEditCustomDocumentName] = useState("");
+  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
+  const [smsPreview, setSmsPreview] = useState<{ name: string; phone: string; password: string; documents: string[] } | null>(null);
+  const [lastRegistered, setLastRegistered] = useState<{ name: string; phone: string; documents: string[] } | null>(null);
 
   const handleLogin = async () => {
     try {
@@ -133,7 +136,7 @@ export default function AdminPage() {
     setDocumentsLoading(true);
     setDocumentsError(null);
     try {
-      const response = await fetch(`/api/documents?t=${Date.now()}`);
+      const response = await fetch(`/api/documents?t=${Date.now()}`, { credentials: "include" });
       if (!response.ok) {
         setDocumentsError(`서류 불러오기 실패 (${response.status})`);
         return;
@@ -170,7 +173,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (authenticated) {
       if (activeTab === "submissions") { fetchSubmissions(); }
-      else if (activeTab === "documents") { fetchDocuments(); }
+      else if (activeTab === "documents") { fetchDocuments(); fetchCustomers(); }
       else if (activeTab === "register") { fetchCustomers(); }
     }
   }, [authenticated, activeTab]);
@@ -208,6 +211,7 @@ export default function AdminPage() {
       if (response.ok) {
         setRegisterMessage({ type: "success", text: "고객이 성공적으로 등록되었습니다." });
         setGeneratedPassword(data.customer.password);
+        setLastRegistered({ name: customerForm.name, phone: customerForm.phone, documents: customerForm.requiredDocuments });
         setCustomerForm({ name: "", phone: "", birthDate: "", requiredDocuments: [] });
         setCustomDocumentName("");
         fetchCustomers();
@@ -229,9 +233,27 @@ export default function AdminPage() {
     } catch (error) { setRegisterMessage({ type: "error", text: "문자 발송 중 오류가 발생했습니다." }); }
   };
 
+  const handleResetPassword = async (customer: any) => {
+    if (!confirm(`${customer.name} 고객의 비밀번호를 재설정하시겠습니까?`)) return;
+    try {
+      const newPassword = String(Math.floor(100000 + Math.random() * 900000));
+      const response = await fetch("/api/admin/customers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ id: customer.id, password: newPassword }),
+      });
+      if (response.ok) {
+        setResetPasswords((prev) => ({ ...prev, [customer.id]: newPassword }));
+      } else {
+        alert("비밀번호 재설정에 실패했습니다.");
+      }
+    } catch { alert("비밀번호 재설정 중 오류가 발생했습니다."); }
+  };
+
   const handleEditCustomer = (customer: any) => {
     setEditingCustomer(customer);
-    setEditForm({ name: customer.name, phone: customer.phone, birthDate: customer.birthDate, requiredDocuments: customer.requiredDocuments || [], password: customer.password || "" });
+    setEditForm({ name: customer.name, phone: customer.phone, birthDate: customer.birthDate, requiredDocuments: customer.requiredDocuments || [], password: "" });
     setEditCustomDocumentName("");
   };
 
@@ -472,9 +494,15 @@ export default function AdminPage() {
                         )}
 
                         <div className="flex gap-2 pt-4 border-t border-slate-100">
-                          <button onClick={() => handleRegisterFromSubmission(submission)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-md transition-colors">
-                            고객 등록
-                          </button>
+                          {customers.some((c) => c.phone === submission.phone) ? (
+                            <span className="px-4 py-2 bg-slate-200 text-slate-500 text-xs font-semibold rounded-md">
+                              등록완료
+                            </span>
+                          ) : (
+                            <button onClick={() => handleRegisterFromSubmission(submission)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-md transition-colors">
+                              고객 등록
+                            </button>
+                          )}
                           <a href={`tel:${submission.phone}`} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-md transition-colors">
                             전화하기
                           </a>
@@ -502,40 +530,91 @@ export default function AdminPage() {
                       ? <span className="text-rose-500">{documentsError}</span>
                       : "아직 제출된 서류가 없습니다."}
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {documents
-                      .filter((d) => !searchQuery || (d.name || "").toLowerCase().includes(searchQuery.toLowerCase()))
-                      .map((doc) => (
-                      <div key={doc.id} className="border border-slate-200 rounded-lg p-5 hover:border-slate-300 transition-colors">
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="text-sm font-bold text-slate-900">{doc.name || "이름없음"}</h3>
-                              <span className="text-xs text-slate-400">{doc.phone || ""}</span>
-                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded">{doc.documentType || "미분류"}</span>
+                ) : (() => {
+                  const filtered = documents.filter((d) => !searchQuery || (d.name || "").toLowerCase().includes(searchQuery.toLowerCase()));
+                  const grouped: Record<string, { name: string; phone: string; requiredDocuments: string[]; docs: typeof documents }> = {};
+                  const norm = (p: string) => (p || "").replace(/[^0-9]/g, "");
+                  filtered.forEach((doc) => {
+                    const key = norm(doc.phone) || doc.name || "unknown";
+                    if (!grouped[key]) {
+                      const matchedCustomer = customers.find((c) => norm(c.phone) === norm(doc.phone));
+                      grouped[key] = { name: doc.name, phone: doc.phone, requiredDocuments: matchedCustomer?.requiredDocuments || [], docs: [] };
+                    }
+                    grouped[key].docs.push(doc);
+                  });
+                  const groups = Object.values(grouped).sort((a, b) => {
+                    const latestA = a.docs[0]?.uploadedAt || "";
+                    const latestB = b.docs[0]?.uploadedAt || "";
+                    return latestB.localeCompare(latestA);
+                  });
+
+                  return (
+                    <div className="space-y-4">
+                      <p className="text-xs text-slate-400">{groups.length}명의 고객, 총 {filtered.length}건</p>
+                      {groups.map((group) => (
+                        <details key={group.phone} className="border border-slate-200 rounded-lg overflow-hidden group" open>
+                          <summary className="flex items-center justify-between px-5 py-4 bg-slate-50 hover:bg-slate-100 cursor-pointer transition-colors">
+                            <div className="flex items-center gap-3">
+                              <h3 className="text-sm font-bold text-slate-900">{group.name}</h3>
+                              <span className="text-xs text-slate-500">{group.phone}</span>
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded">
+                                {group.docs.length}{group.requiredDocuments.length > 0 ? `/${group.requiredDocuments.length}` : ""}건
+                              </span>
+                              {group.requiredDocuments.length > 0 && group.docs.length >= group.requiredDocuments.length && (
+                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded border border-emerald-200">완료</span>
+                              )}
                             </div>
-                            <p className="text-xs text-slate-500 truncate">{doc.fileName || ""}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleString("ko-KR") : ""}</p>
+                            <div className="flex items-center gap-2">
+                              <a href={`tel:${group.phone}`} className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-md transition-colors">전화</a>
+                              <span className="text-slate-400 text-xs group-open:rotate-180 transition-transform">▼</span>
+                            </div>
+                          </summary>
+
+                          {group.requiredDocuments.length > 0 && (
+                            <div className="px-5 py-3 bg-white border-b border-slate-100">
+                              <p className="text-xs font-semibold text-slate-500 mb-2">요청 서류</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {group.requiredDocuments.map((reqDoc) => {
+                                  const submitted = group.docs.some((d) => d.documentType === reqDoc);
+                                  return (
+                                    <span key={reqDoc} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${submitted ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-500 border border-slate-200"}`}>
+                                      <span className="text-[10px]">{submitted ? "✓" : "○"}</span>
+                                      {reqDoc}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="divide-y divide-slate-100">
+                            {group.docs.map((doc) => (
+                              <div key={doc.id} className="flex items-center gap-3 px-5 py-3 hover:bg-indigo-50/30 transition-colors">
+                                <a
+                                  href={doc.fileUrl || "#"}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-3 flex-1 min-w-0"
+                                >
+                                  <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded shrink-0">{doc.documentType || "미분류"}</span>
+                                  <span className="text-sm text-slate-700 truncate flex-1">{doc.fileName}</span>
+                                  <span className="text-xs text-slate-400 shrink-0">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString("ko-KR") : ""}</span>
+                                </a>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id, doc.phone); }}
+                                  className="text-slate-300 hover:text-rose-500 transition-colors shrink-0"
+                                  title="삭제"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                              </div>
+                            ))}
                           </div>
-                          <div className="flex gap-2 ml-4 shrink-0">
-                            <a
-                              href={doc.fileUrl || "#"}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-md transition-colors"
-                            >
-                              보기
-                            </a>
-                            <button onClick={() => handleDeleteDocument(doc.id, doc.phone)} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-md transition-colors">
-                              삭제
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        </details>
+                      ))}
+                    </div>
+                  );
+                })()}
               </>
             )}
 
@@ -603,17 +682,22 @@ export default function AdminPage() {
                       <p className="text-sm text-amber-800">
                         <strong>생성된 비밀번호:</strong> <span className="font-mono">{generatedPassword}</span>
                       </p>
-                      <p className="text-xs text-amber-600 mt-0.5">이 비밀번호가 고객에게 문자로 발송됩니다.</p>
                     </div>
                   )}
 
                   <div className="flex gap-3">
-                    <button onClick={handleRegisterCustomer} disabled={registering} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-150 disabled:opacity-50 text-sm">
-                      {registering ? "등록 중..." : "고객 등록"}
-                    </button>
-                    {generatedPassword && !smsSent && (
-                      <button onClick={handleSendSMS} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-150 text-sm">
-                        문자 발송
+                    {lastRegistered ? (
+                      <button onClick={() => { setLastRegistered(null); setGeneratedPassword(""); setRegisterMessage(null); }} className="flex-1 bg-slate-500 hover:bg-slate-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-150 text-sm">
+                        등록완료 — 새 고객 등록하기
+                      </button>
+                    ) : (
+                      <button onClick={handleRegisterCustomer} disabled={registering} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-150 disabled:opacity-50 text-sm">
+                        {registering ? "등록 중..." : "고객 등록"}
+                      </button>
+                    )}
+                    {generatedPassword && lastRegistered && (
+                      <button onClick={() => setSmsPreview({ name: lastRegistered.name, phone: lastRegistered.phone, password: generatedPassword, documents: lastRegistered.documents })} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-150 text-sm">
+                        문자 내용 보기
                       </button>
                     )}
                   </div>
@@ -635,9 +719,28 @@ export default function AdminPage() {
                               <h4 className="text-sm font-bold text-slate-900">{customer.name}</h4>
                               <p className="text-xs text-slate-500 mt-0.5">{customer.phone}</p>
                               {customer.birthDate && <p className="text-xs text-slate-400">생년월일: {customer.birthDate}</p>}
-                              <p className="text-xs text-slate-500 mt-1">
-                                비밀번호: <span className="font-mono font-semibold text-indigo-600">{customer.password || "없음"}</span>
-                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                {resetPasswords[customer.id] ? (
+                                  <>
+                                    <p className="text-xs text-slate-500">
+                                      새 비밀번호: <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">{resetPasswords[customer.id]}</span>
+                                    </p>
+                                    <button
+                                      onClick={() => setSmsPreview({ name: customer.name, phone: customer.phone, password: resetPasswords[customer.id], documents: customer.requiredDocuments || [] })}
+                                      className="text-xs text-emerald-600 hover:text-emerald-500 font-semibold underline underline-offset-2"
+                                    >
+                                      문자 복사
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => handleResetPassword(customer)}
+                                    className="text-xs text-indigo-600 hover:text-indigo-500 font-semibold underline underline-offset-2"
+                                  >
+                                    비밀번호 재설정
+                                  </button>
+                                )}
+                              </div>
                               <p className="text-xs text-slate-400 mt-1 truncate">서류: {customer.requiredDocuments?.join(", ") || "없음"}</p>
                             </div>
                             <div className="flex gap-1.5 ml-4 shrink-0">
@@ -748,6 +851,49 @@ export default function AdminPage() {
                   {updating ? "저장 중..." : "저장"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {smsPreview && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200">
+              <h2 className="text-base font-bold text-slate-900">고객에게 보낼 문자 내용</h2>
+              <button onClick={() => setSmsPreview(null)} className="text-slate-400 hover:text-slate-600 text-xl">×</button>
+            </div>
+            <div className="p-6">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-800 whitespace-pre-wrap font-mono leading-relaxed">
+{`[지산 법무사사무소 서류 제출 안내]
+
+${smsPreview.name}님 안녕하세요.
+
+상담 진행을 위해 아래 서류를 제출해주시기 바랍니다.
+
+필요 서류: ${smsPreview.documents.join(", ") || "없음"}
+
+서류 제출 방법:
+1. 아래 링크 접속
+${typeof window !== "undefined" ? window.location.origin : ""}/documents
+
+2. 로그인 정보
+  아이디: ${smsPreview.phone}
+  비밀번호: ${smsPreview.password}
+
+3. 필요한 서류를 확인하고 업로드해주세요.
+
+문의: 031-388-7771`}
+              </div>
+              <button
+                onClick={() => {
+                  const msg = `[지산 법무사사무소 서류 제출 안내]\n\n${smsPreview.name}님 안녕하세요.\n\n상담 진행을 위해 아래 서류를 제출해주시기 바랍니다.\n\n필요 서류: ${smsPreview.documents.join(", ") || "없음"}\n\n서류 제출 방법:\n1. 아래 링크 접속\n${typeof window !== "undefined" ? window.location.origin : ""}/documents\n\n2. 로그인 정보\n  아이디: ${smsPreview.phone}\n  비밀번호: ${smsPreview.password}\n\n3. 필요한 서류를 확인하고 업로드해주세요.\n\n문의: 031-388-7771`;
+                  navigator.clipboard.writeText(msg);
+                  alert("문자 내용이 복사되었습니다!");
+                }}
+                className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+              >
+                문자 내용 복사하기
+              </button>
             </div>
           </div>
         </div>

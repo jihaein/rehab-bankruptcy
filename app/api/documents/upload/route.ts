@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { validateFileUpload } from "@/lib/middleware";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireCustomerAuth, normalizePhone } from "@/lib/auth";
 
-// 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
@@ -15,10 +15,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const customerAuth = await requireCustomerAuth(request);
+    if (!customerAuth.authorized) {
+      return NextResponse.json(
+        { error: "인증이 필요합니다. 다시 로그인해주세요." },
+        { status: 401 }
+      );
+    }
+
     const formData = await request.formData();
     const name = formData.get("name") as string;
-    const phone = formData.get("phone") as string;
+    const phone = normalizePhone(formData.get("phone") as string || "");
+
+    if (customerAuth.phone !== phone) {
+      return NextResponse.json(
+        { error: "본인의 서류만 업로드할 수 있습니다." },
+        { status: 403 }
+      );
+    }
     const privacyConsent = formData.get("privacyConsent") as string;
+    const sensitiveInfoConsent = formData.get("sensitiveInfoConsent") as string;
+    const overseasTransferConsent = formData.get("overseasTransferConsent") as string;
     const status = (formData.get("status") as string) || "draft";
     const documentTypes = formData.getAll("documentTypes") as string[];
 
@@ -29,12 +46,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (privacyConsent !== "true") {
+    if (privacyConsent !== "true" || sensitiveInfoConsent !== "true" || overseasTransferConsent !== "true") {
       return NextResponse.json(
-        { error: "개인정보 수집 및 이용에 동의해주세요." },
+        { error: "필수 동의 항목에 모두 동의해주세요." },
         { status: 400 }
       );
     }
+
+    const consentMetadata = {
+      privacyConsent: true,
+      sensitiveInfoConsent: true,
+      overseasTransferConsent: true,
+      marketingConsent: formData.get("marketingConsent") === "true",
+      consentVersion: "2026-02-18-v1",
+      consentTimestamp: new Date().toISOString(),
+      consentIp: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+        || request.headers.get("x-real-ip")
+        || "unknown",
+    };
 
     if (!documentTypes || documentTypes.length === 0) {
       return NextResponse.json(
@@ -132,7 +161,7 @@ export async function POST(request: NextRequest) {
           );
         }
         
-        const documentData = {
+        const documentData: Record<string, any> = {
           id: randomUUID(),
           customer_id: customerId,
           name,
@@ -143,6 +172,7 @@ export async function POST(request: NextRequest) {
           uploaded_at: new Date().toISOString(),
           status: status as "draft" | "submitted",
           edit_history: editHistory.length > 0 ? editHistory : null,
+          consent_metadata: consentMetadata,
         };
 
         const { data: insertedDoc, error: dbError } = await supabaseAdmin
@@ -158,6 +188,12 @@ export async function POST(request: NextRequest) {
           );
         }
         
+        let fileUrl = '#';
+        const { data: signedUrlData } = await supabaseAdmin.storage
+          .from('documents')
+          .createSignedUrl(insertedDoc.file_url, 3600);
+        fileUrl = signedUrlData?.signedUrl || '#';
+
         const document = {
           id: insertedDoc.id,
           name: insertedDoc.name,
@@ -165,7 +201,7 @@ export async function POST(request: NextRequest) {
           documentType: insertedDoc.document_type,
           fileName: insertedDoc.file_name,
           savedFileName: fileName,
-          fileUrl: `/api/documents/file?file=${encodeURIComponent(insertedDoc.file_url)}`,
+          fileUrl,
           uploadedAt: insertedDoc.uploaded_at,
           status: insertedDoc.status,
           privacyConsent: true,

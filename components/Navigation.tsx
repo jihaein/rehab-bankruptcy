@@ -2,49 +2,96 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 export default function Navigation() {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
+    { href: "/about", label: "사무소 소개" },
     { href: "/diagnosis", label: "무료 진단" },
     { href: "/documents", label: "서류 제출" },
-    { href: "/admin", label: "관리자" },
   ];
 
+  const isActive = (href: string) =>
+    pathname === href || pathname?.startsWith(href + "/");
+
+  if (pathname === "/admin" || pathname?.startsWith("/admin/")) return null;
+
   return (
-    <nav className="bg-slate-900 border-b border-slate-800">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <nav className="bg-[#1a1f2e] sticky top-0 z-50">
+      <div className="max-w-6xl mx-auto px-5 md:px-8">
         <div className="flex justify-between h-16">
-          <div className="flex items-center">
-            <Link href="/" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
-                <svg className="w-4.5 h-4.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                </svg>
-              </div>
-              <span className="text-lg font-bold text-white tracking-tight">
-                회생·파산 진단센터
-              </span>
-            </Link>
-          </div>
-          <div className="flex items-center space-x-1">
+          <Link href="/" className="flex items-center gap-2">
+            <span className="text-[16px] font-bold text-white tracking-tight">지산 법무사사무소</span>
+            <span className="hidden sm:block text-[11px] text-slate-500 border-l border-slate-600 pl-2 ml-0.5">개인회생·파산 전문</span>
+          </Link>
+
+          <div className="hidden md:flex items-center gap-1">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${
-                  pathname === item.href || pathname?.startsWith(item.href + "/")
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-slate-300 hover:text-white hover:bg-slate-800"
+                className={`px-4 py-2 text-[14px] font-medium rounded-md transition-colors ${
+                  isActive(item.href)
+                    ? "bg-white/10 text-white"
+                    : "text-slate-400 hover:text-white"
                 }`}
               >
                 {item.label}
               </Link>
             ))}
+            <a
+              href="tel:0313887771"
+              className="ml-3 px-4 py-2 text-[14px] font-semibold rounded-md bg-[#4f6ef7] hover:bg-[#4060e6] text-white transition-colors"
+            >
+              상담 전화
+            </a>
           </div>
+
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="md:hidden flex items-center text-slate-400"
+            aria-label="메뉴"
+          >
+            {mobileOpen ? (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            )}
+          </button>
         </div>
       </div>
+
+      {mobileOpen && (
+        <div className="md:hidden bg-[#1a1f2e] border-t border-white/5">
+          <div className="px-5 py-3 space-y-1">
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={`block px-4 py-2.5 text-[15px] font-medium rounded-md ${
+                  isActive(item.href) ? "bg-white/10 text-white" : "text-slate-400"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+            <a
+              href="tel:0313887771"
+              className="block text-center mt-2 px-4 py-2.5 text-[15px] font-semibold rounded-md bg-[#4f6ef7] text-white"
+            >
+              031-388-7771 상담 전화
+            </a>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

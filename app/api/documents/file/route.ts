@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { adminAuthMiddleware } from "@/lib/middleware";
 
-// 동적 라우트로 강제 설정 (Next.js 14)
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const authError = await adminAuthMiddleware(request);
+  if (authError) {
+    return NextResponse.json(
+      { error: "인증이 필요합니다. 관리자로 로그인해주세요." },
+      { status: 401 }
+    );
+  }
+
   try {
     if (!supabaseAdmin) {
       return NextResponse.json(
@@ -15,7 +23,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = request.nextUrl;
     const fileName = searchParams.get("file");
-    const documentId = searchParams.get("id"); // 문서 ID로도 접근 가능
+    const documentId = searchParams.get("id");
 
     if (!fileName && !documentId) {
       return NextResponse.json(

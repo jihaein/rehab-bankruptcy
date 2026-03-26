@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomInt } from "crypto";
 import { adminAuthMiddleware } from "@/lib/middleware";
-import { hashPassword } from "@/lib/auth";
+import { normalizePhone } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 
 // 동적 라우트로 강제 설정 (Next.js 14)
@@ -31,14 +31,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, phone, birthDate, requiredDocuments } = body;
+    const { name, phone: rawPhone, birthDate, requiredDocuments } = body;
 
-    if (!name || !phone || !requiredDocuments || requiredDocuments.length === 0) {
+    if (!name || !rawPhone || !requiredDocuments || requiredDocuments.length === 0) {
       return NextResponse.json(
         { error: "이름, 전화번호, 그리고 필요한 서류를 선택해주세요." },
         { status: 400 }
       );
     }
+
+    const phone = normalizePhone(rawPhone);
 
     // 기존 고객 확인
     const { data: existingCustomers, error: fetchError } = await supabaseAdmin
@@ -60,7 +62,6 @@ export async function POST(request: NextRequest) {
       : null;
 
     const password = generatePassword();
-    const hashedPassword = hashPassword(password);
     
     const customerData = {
       id: existingCustomer?.id || generateId(),
@@ -68,8 +69,7 @@ export async function POST(request: NextRequest) {
       phone,
       birth_date: birthDate || null,
       required_documents: requiredDocuments,
-      password: hashedPassword,
-      password_plain: password, // 문자 발송용 (나중에 제거 권장)
+      password,
       updated_at: new Date().toISOString(),
     };
 
@@ -158,8 +158,6 @@ export async function GET(request: NextRequest) {
       phone: customer.phone,
       birthDate: customer.birth_date,
       requiredDocuments: customer.required_documents || [],
-      password: customer.password_plain || "", // 평문 비밀번호 표시 (관리자용)
-      passwordPlain: customer.password_plain,
       createdAt: customer.created_at,
       updatedAt: customer.updated_at,
     }));
@@ -185,7 +183,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, name, phone, birthDate, requiredDocuments, password } = body;
+    const { id, name, phone: rawPhone, birthDate, requiredDocuments, password } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -214,10 +212,10 @@ export async function PUT(request: NextRequest) {
     };
 
     if (name) updateData.name = name;
-    if (phone) updateData.phone = phone;
+    if (rawPhone) updateData.phone = normalizePhone(rawPhone);
     if (birthDate !== undefined) updateData.birth_date = birthDate;
     if (requiredDocuments) updateData.required_documents = requiredDocuments;
-    if (password) updateData.password = hashPassword(password);
+    if (password) updateData.password = password;
 
     const { data: updatedCustomer, error: updateError } = await supabaseAdmin
       .from('customers')
@@ -241,8 +239,6 @@ export async function PUT(request: NextRequest) {
       phone: updatedCustomer.phone,
       birthDate: updatedCustomer.birth_date,
       requiredDocuments: updatedCustomer.required_documents || [],
-      password: updatedCustomer.password_plain || "", // 평문 비밀번호 표시 (관리자용)
-      passwordPlain: updatedCustomer.password_plain,
       createdAt: updatedCustomer.created_at,
       updatedAt: updatedCustomer.updated_at,
     };
